@@ -1,0 +1,169 @@
+#!/bin/python
+
+import contextlib
+import fcntl
+import math
+import os
+import struct
+import sys
+import termios
+
+def decode(value):
+  half, full = 0x42480000, 0x42c80000
+  exponent = math.log(2) / (math.log(full) - math.log(half))
+  sign, value = 2 * (value < 1 << 31) - 1, float(value & (1 << 31) - 1)
+  return 100.0 * sign * (value / full) ** exponent
+
+def encode(value):
+  half, full = 0x42480000, 0x42c80000
+  exponent = (math.log(full) - math.log(half)) / math.log(2)
+  sign, value = (value < 0) << 31, min(abs(value) / 100.0, 1.0)
+  return sign + round(full * value ** exponent)
+
+def get(device, header, size):
+  data, length = bytearray(size), 0
+  with memoryview(data) as view:
+    while length < size:
+      length = length + device.readinto(view[length:])
+      try:
+        index = data.index(header, 0, length)
+      except:
+        index = length + 1 - len(header)
+      if index > 0:
+        view[0 : length - index] = view[index : length]
+        length = length - index
+  return data
+
+@contextlib.contextmanager
+def serial(path, rate = 9600):
+  handle = os.open(path, os.O_RDWR | os.O_NOCTTY)
+  saved = termios.tcgetattr(handle)
+  chars = [i == termios.VMIN for i in range(len(saved[6]))]
+  rate = getattr(termios, f'B{rate}', saved[4])
+  try:
+    fcntl.flock(handle, fcntl.LOCK_EX)
+    termios.tcsetattr(handle, termios.TCSAFLUSH, [0, 0,
+      termios.CLOCAL | termios.CREAD | termios.CS8, 0, rate, rate, chars])
+    yield open(handle, 'r+b', buffering = 0, closefd = False)
+  finally:
+    termios.tcsetattr(handle, termios.TCSAFLUSH, saved)
+    os.close(handle)
+
+def update(config, offset, active, control = None, low = 0, high = 127,
+    *parameters):
+  config[offset] = bool(active)
+  if control is not None:
+    struct.pack_into('4B', config, offset + 2, low, high, max(0, control),
+      control >= 0)
+  length, parameters = len(parameters), map(encode, parameters)
+  struct.pack_into(f'<{length}I', config, offset + 6, *parameters)
+
+def usage():
+  sys.stderr.write(f'''\
+Usage:
+  {sys.argv[0]} DEVICE [show]
+  {sys.argv[0]} DEVICE [BANK] channel CHANNEL
+  {sys.argv[0]} DEVICE [BANK] vibrato ENABLE [ GAIN THRESHOLD ]
+  {sys.argv[0]} DEVICE [BANK] bend ENABLE [ LMIN LMAX RMIN RMAX ]
+  {sys.argv[0]} DEVICE [BANK] tilt ENABLE [ CONTROL LOW HIGH MIN MAX ]
+  {sys.argv[0]} DEVICE [BANK] roll ENABLE [ CONTROL LOW HIGH MIN MAX ]
+  {sys.argv[0]} DEVICE bank BANK
+  {sys.argv[0]} DEVICE store
+
+Arguments:
+  BANK: gesture bank (1-4), defaults to selected bank
+  CHANNEL: output MIDI channel (1-16)
+  CONTROL: controller number (0-127) or -1 for pitch bend
+  DEVICE: serial device path, e.g. /dev/ttyACM0
+  ENABLE: 0 or 1 to disable or enable the gesture
+  LOW, HIGH: lowest and highest controller values (0-127)
+  Other values are percentages or degrees from -100.0 to 100.0
+''')
+  sys.exit(64)
+
+if len(sys.argv) < 2:
+  usage()
+
+with serial(sys.argv[1]) as device:
+  device.write(b'jeannine\x01\x00\x00\x00')
+  config = get(device, b'jeannine\x03\x00\x00\x00', 548)
+
+  if len(sys.argv) == 2 or sys.argv[2:] == ['show']:
+    print(f'Hub version: {config[14]}.{config[15]}')
+    if config[16] == config[17] == 0:
+      print('Ring version: not connected')
+    else:
+      print(f'Ring version: {config[16]}.{config[17]}')
+    print(f'Selected bank: {config[18] + 1}')
+
+    for bank in [1, 2, 3, 4]:
+      channel = config[132 * bank - 110]
+      vibrato = struct.unpack_from('<B5x2I', config, 132 * bank - 106)
+      bend = struct.unpack_from('<B5x4I', config, 132 * bank - 74)
+      tilt = struct.unpack_from('<Bx4B2I', config, 132 * bank - 42)
+      roll = struct.unpack_from('<Bx4B2I', config, 132 * bank - 10)
+      print(f'\nBank {bank}:')
+      print('  channel', channel)
+      print('  vibrato', vibrato[0],
+        *(f'{decode(value):0.1f}' for value in vibrato[1:]))
+      print('  bend', bend[0],
+        *(f'{decode(value):0.1f}' for value in bend[1:]))
+      print('  tilt', tilt[0], tilt[3] if tilt[4] else -1, *tilt[1:3],
+        *(f'{decode(value):0.1f}' for value in tilt[5:]))
+      print('  roll', roll[0], roll[3] if roll[4] else -1, *roll[1:3],
+        *(f'{decode(value):0.1f}' for value in roll[5:]))
+    sys.exit(0)
+
+  if len(sys.argv) == 3 and sys.argv[2] == 'store':
+    device.write(b'jeannine\x04\x00\x00\x00')
+    sys.exit(0)
+
+  if len(sys.argv) == 4 and sys.argv[2] == 'bank':
+    try:
+      bank = int(sys.argv[3])
+      assert 1 <= bank <= 4
+    except:
+      usage()
+    config[18] = bank - 1
+    device.write(config)
+    sys.exit(0)
+
+  try:
+    bank, gesture = int(sys.argv[2]), sys.argv[3:]
+    assert len(gesture) > 0 and 1 <= bank <= 4
+  except:
+    bank, gesture = config[18] + 1, sys.argv[2:]
+
+  if len(gesture) == 2 and gesture[0] == 'channel':
+    try:
+      channel = int(gesture[1])
+      assert 1 <= channel <= 16
+    except:
+      usage()
+    config[132 * bank - 110] = channel
+  else:
+    if len(gesture) in [2, 4] and gesture[0] == 'vibrato':
+      offset = 132 * bank - 106
+      gesture[2:2] = [-1, 0, 127]
+    elif len(gesture) in [2, 6] and gesture[0] == 'bend':
+      offset = 132 * bank - 74
+      gesture[2:2] = [-1, 0, 127]
+    elif len(gesture) in [2, 7] and gesture[0] == 'tilt':
+      offset = 132 * bank - 42
+    elif len(gesture) in [2, 7] and gesture[0] == 'roll':
+      offset = 132 * bank - 10
+    else:
+      usage()
+
+    try:
+      gesture[1:5] = map(int, gesture[1:5])
+      gesture[5:] = map(float, gesture[5:])
+      for index, value in enumerate(gesture[1:]):
+        assert value >= [0, -1, 0, 0, -100.0][min(index, 4)]
+        assert value <= [1, 127, 127, 127, 100.0][min(index, 4)]
+    except:
+      usage()
+    update(config, offset, *gesture[1:])
+
+  device.write(config)
+  sys.exit(0)

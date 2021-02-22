@@ -81,6 +81,17 @@ Arguments:
 ''')
   sys.exit(64)
 
+def die(error):
+  if hasattr(error, 'filename'):
+    print(error.filename, end = ': ', file = sys.stderr)
+  if isinstance(error, termios.error):
+    print(error.args[1], file = sys.stderr)
+  else:
+    print(getattr(error, 'strerror', str(error)), file = sys.stderr)
+  sys.exit(1)
+
+sys.excepthook = lambda type, error, trace: die(error)
+
 if len(sys.argv) < 2:
   usage()
 

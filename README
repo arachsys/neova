@@ -1,0 +1,242 @@
+Configuration tool for Enhancia Neova ring controller
+=====================================================
+
+ringctl is a command-line script to configure an Enhancia Neova MIDI ring
+controller, covering the same functions as the graphical Neova Dashboard
+application.
+
+Connected by USB to a Linux, BSD or macOS host, the Neova hub will register
+as both a standard ACM serial port and a class-compliant MIDI port.
+
+Ring gestures are converted to pitch bend and controller messages which are
+received by the host or instrument on the USB MIDI port. Meanwhile, the USB
+serial port streams direct sensor and battery information, and it is also
+used for configuration and firmware upgrades.
+
+
+Installation and testing
+------------------------
+
+The script requires Python 3.8 or later. Run in situ with 'python3 ringctl'
+or 'python ringctl'. To install, ensure the #! interpreter at the top of the
+script is right for your system, then copy it into a directory on your path.
+
+On Linux, the serial device looks like /dev/ttyACM0, whereas on BSD it is of
+the form /dev/cuaU0. Shell tab completion is useful on macOS, which opts for
+long, ugly names like /dev/cu.usbmodem0000000000001.
+
+Test ringctl by running it with just the device as a single argument. It
+should detect the hub and report the configuration to stdout. For example:
+
+  $ ringctl /dev/ttyACM0
+  Hub version: 1.1
+  Ring version: 1.1
+  Selected bank: 1
+
+  Bank 1:
+    channel 1
+    vibrato 1 50.0 40.2
+    bend 1 -40.2 -20.0 20.0 40.2
+    tilt 1 1 0 127 0.0 62.1
+    roll 1 2 0 127 0.0 62.1
+
+  Bank 2:
+    channel 1
+    vibrato 1 50.0 40.2
+    bend 1 -40.2 -20.0 20.0 40.2
+    tilt 1 1 0 127 0.0 62.1
+    roll 1 2 0 127 0.0 62.1
+
+  Bank 3:
+    channel 1
+    vibrato 1 50.0 40.2
+    bend 1 -40.2 -20.0 20.0 40.2
+    tilt 1 1 0 127 0.0 62.1
+    roll 1 2 0 127 0.0 62.1
+
+  Bank 4:
+    channel 1
+    vibrato 1 50.0 40.2
+    bend 1 -40.2 -20.0 20.0 40.2
+    tilt 1 1 0 127 0.0 62.1
+    roll 1 2 0 127 0.0 62.1
+
+Common errors include 'Permission denied' if you lack read-write access to
+the device, and 'Not a tty' or hanging if you use the wrong device.
+
+When the Neova Dashboard is installed on macOS, a background daemon runs
+continuously even when the application is not running. This steals output
+from the hub and will prevent ringctl from working. The daemon also eats
+battery by spinning in a short-timeout poll() loop, whether or not a hub is
+connected. Hopefully the manufacturer will eliminate it in a future release.
+
+Please report other problems or bugs to Chris Webb <chris@arachsys.com>.
+
+
+Showing current configuration
+-----------------------------
+
+To show the hub/ring versions and the configuration of gestures in each
+bank, use
+
+  ringctl DEVICE
+
+or
+
+  ringctl DEVICE show
+
+The output format for each gesture is the same as is expected by the
+corresponding gesture configuration command described below.
+
+
+Selecting a gesture bank
+------------------------
+
+To select a gesture bank from 1 to 4, use
+
+  ringctl DEVICE bank BANK
+
+or change it using the buttons on the hub. MIDI output is configured
+according to the selected bank, and the configuration commands below will
+default to modifying the selected bank if the BANK argument is omitted.
+
+
+Selecting the output MIDI channel
+---------------------------------
+
+To select the output MIDI channel for a bank, use
+
+  ringctl DEVICE [BANK] channel CHANNEL
+
+for CHANNEL between 1 and 16.
+
+
+Configuring vibrato
+-------------------
+
+Vibrato is activated by shaking your hand left to right. The speed and
+intensity of the motion will be reflected in the frequency and depth of an
+output pitch bend oscillation. To configure this gesture, use
+
+  ringctl DEVICE [BANK] vibrato ENABLE
+
+or
+
+  ringctl DEVICE [BANK] vibrato ENABLE GAIN THRESHOLD
+
+ENABLE is 0 to disable vibrato, or 1 to enable it. The pink LED on the hub
+shows this status and it can be toggled with the corresponding hub button.
+
+GAIN and THRESHOLD are percentages from 0.0 to 100.0. Higher GAIN deepens
+the pitch oscillation for a given finger motion, and higher THRESHOLD
+increases the degree of motion required before the gesture activates.
+
+These parameters are reported by 'ringctl DEVICE show' in the same order and
+format as required by this command.
+
+
+Configuring pitch bend
+----------------------
+
+Pitch bend is activated by rolling your hand to the left to bend down or to
+the right to bend up. The pitch deflection increases with the angle of roll.
+To configure this gesture, use
+
+  ringctl DEVICE [BANK] bend ENABLE
+
+or
+
+  ringctl DEVICE [BANK] bend ENABLE LMIN LMAX RMIN RMAX
+
+ENABLE is 0 to disable bend, or 1 to enable it. The purple LED on the hub
+shows this status and it can be toggled with the corresponding hub button.
+
+LMIN, LMAX, RMIN and RMAX are angles from -100.0 degrees to +100.0 degrees,
+such that LMIN < LMAX < RMIN < RMAX, where a level hand position corresponds
+to 0.0 degrees. As leftward roll reaches LMAX, pitch starts to bend down,
+with full deflection at LMIN. Similarly, as rightward roll reaches RMIN,
+pitch starts to bend up, with full deflection at RMAX.
+
+
+Configuring tilt
+----------------
+
+Tilt is activated by tipping your hand to point upwards or downwards. The
+controller or pitch deflection varies with the angle of tilt. To configure
+the tilt gesture, use
+
+  ringctl DEVICE [BANK] tilt ENABLE
+
+or
+
+  ringctl DEVICE [BANK] tilt ENABLE CONTROL LOW HIGH MIN MAX
+
+ENABLE is 0 to disable tilt, or 1 to enable it. The yellow LED on the hub
+shows this status and it can be toggled with the corresponding hub button.
+
+CONTROL is the MIDI controller number (0-127) to generate, or -1 for pitch
+bend. Controller output is constrained to lie between LOW and HIGH (0-127).
+
+MIN, MAX are angles from -100.0 degrees to +100.0 degrees, where a level
+hand position corresponds to 0.0 degrees. As your hand tilts between MIN and
+MAX, controller output varies continuously between LOW and HIGH.
+
+
+Configuring roll
+----------------
+
+Roll is activated by rolling your hand to the left or right. The controller
+or pitch deflection varies with the angle of roll. To configure the roll
+gesture, use
+
+  ringctl DEVICE [BANK] roll ENABLE
+
+or
+
+  ringctl DEVICE [BANK] roll ENABLE CONTROL LOW HIGH MIN MAX
+
+ENABLE is 0 to disable roll, or 1 to enable it. The turquoise LED on the hub
+shows this status and it can be toggled with the corresponding hub button.
+
+CONTROL is the MIDI controller number (0-127) to generate, or -1 for pitch
+bend. Controller output is constrained to lie between LOW and HIGH (0-127).
+
+MIN, MAX are angles from -100.0 degrees to +100.0 degrees, where a level
+hand position corresponds to 0.0 degrees. As your hand rolls between MIN and
+MAX, controller output varies continuously between LOW and HIGH.
+
+
+Storing the configuration
+-------------------------
+
+Gesture configuration changes made using the above commands can be written
+to flash in the hub using
+
+  ringctl DEVICE store
+
+so that they will not be lost when it is powered down.
+
+
+Implementation notes
+--------------------
+
+Serial port access is inevitably ugly, but the code should be reasonably
+portable between Linux and BSD-like systems. Terminal attributes are saved
+before modification so they can be restored on exit.
+
+Parameter values between -100.0 and 100.0 are encoded in the serial protocol
+as 32-bit little-endian integers. The high bit represents the sign, and the
+lower bits are proportional to x ** k where k is chosen such that x = 50.0
+corresponds to 0x42480000, and x = 100.0 corresponds to 0x42c80000. See the
+definitions of encode() and decode() in the ringctl script for details.
+
+Unfortunately, protocol messages are neither framed nor encode their own
+length, so we can only assume the expected number of bytes follow a given
+message header. This will be fragile as the protocol evolves.
+
+
+Copying
+-------
+
+This software was written by Chris Webb <chris@arachsys.com> and is
+distributed as Free Software under the terms of the MIT license in COPYING.

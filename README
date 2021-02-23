@@ -29,37 +29,33 @@ Test ringctl by running it with just the device as a single argument. It
 should detect the hub and report the configuration to stdout. For example:
 
   $ ringctl /dev/ttyACM0
-  Hub version: 1.1
-  Ring version: 1.1
-  Selected bank: 1
+  hub 1.1
+  ring 1.1
+  bank 1
 
-  Bank 1:
-    channel 1
-    vibrato 1 50.0 40.2
-    bend 1 -40.2 -20.0 20.0 40.2
-    tilt 1 1 0 127 0.0 62.1
-    roll 1 2 0 127 0.0 62.1
+  1 channel 1
+  1 1 1 vibrato 50.0 40.2
+  1 2 1 bend -40.2 -20.0 20.0 40.2
+  1 3 1 tilt 1 0 127 0.0 62.1
+  1 4 1 roll 2 0 127 0.0 62.1
 
-  Bank 2:
-    channel 1
-    vibrato 1 50.0 40.2
-    bend 1 -40.2 -20.0 20.0 40.2
-    tilt 1 1 0 127 0.0 62.1
-    roll 1 2 0 127 0.0 62.1
+  2 channel 1
+  2 1 1 vibrato 50.0 40.2
+  2 2 1 bend -40.2 -20.0 20.0 40.2
+  2 3 1 tilt 1 0 127 0.0 62.1
+  2 4 1 roll 2 0 127 0.0 62.1
 
-  Bank 3:
-    channel 1
-    vibrato 1 50.0 40.2
-    bend 1 -40.2 -20.0 20.0 40.2
-    tilt 1 1 0 127 0.0 62.1
-    roll 1 2 0 127 0.0 62.1
+  3 channel 1
+  3 1 1 vibrato 50.0 40.2
+  3 2 1 bend -40.2 -20.0 20.0 40.2
+  3 3 1 tilt 1 0 127 0.0 62.1
+  3 4 1 roll 2 0 127 0.0 62.1
 
-  Bank 4:
-    channel 1
-    vibrato 1 50.0 40.2
-    bend 1 -40.2 -20.0 20.0 40.2
-    tilt 1 1 0 127 0.0 62.1
-    roll 1 2 0 127 0.0 62.1
+  4 channel 1
+  4 1 1 vibrato 50.0 40.2
+  4 2 1 bend -40.2 -20.0 20.0 40.2
+  4 3 1 tilt 1 0 127 0.0 62.1
+  4 4 1 roll 2 0 127 0.0 62.1
 
 Common errors include 'Permission denied' if you lack read-write access to
 the device, and 'Not a tty' or hanging if you use the wrong device.
@@ -73,11 +69,16 @@ connected. Hopefully the manufacturer will eliminate it in a future release.
 Please report other problems or bugs to Chris Webb <chris@arachsys.com>.
 
 
-Showing current configuration
------------------------------
+Showing current settings
+------------------------
 
-To show the hub/ring versions and the configuration of gestures in each
-bank, use
+Neova has four gesture banks which can be selected using the A, B, C, D
+buttons while the shift button is held. Each of these has four slots which
+can be independently configured with any of the available gestures and
+toggled on/off with the A, B, C, D buttons.
+
+To show the hub/ring versions and the gestures configured in each BANK SLOT
+pair, use
 
   ringctl DEVICE
 
@@ -85,8 +86,16 @@ or
 
   ringctl DEVICE show
 
-The output format for each gesture is the same as is expected by the
-corresponding gesture configuration command described below.
+The output format for each bank and slot is the same as is expected by the
+configuration commands described below:
+
+  BANK channel CHANNEL
+  BANK SLOT ENABLE vibrato GAIN THRESHOLD
+  BANK SLOT ENABLE bend LMIN LMAX RMIN RMAX
+  BANK SLOT ENABLE tilt CONTROL LOW HIGH MIN MAX
+  BANK SLOT ENABLE roll CONTROL LOW HIGH MIN MAX
+
+Slots with no gesture configured are omitted from the listing.
 
 
 Selecting a gesture bank
@@ -96,17 +105,16 @@ To select a gesture bank from 1 to 4, use
 
   ringctl DEVICE bank BANK
 
-or change it using the buttons on the hub. MIDI output is configured
-according to the selected bank, and the configuration commands below will
-default to modifying the selected bank if the BANK argument is omitted.
+or change it using the hub buttons. The MIDI output will now correspond to
+the gestures in the enabled slots of this bank.
 
 
-Selecting the output MIDI channel
----------------------------------
+Configuring the output MIDI channel
+-----------------------------------
 
-To select the output MIDI channel for a bank, use
+To configure the output MIDI channel for a bank, use
 
-  ringctl DEVICE [BANK] channel CHANNEL
+  ringctl DEVICE BANK channel CHANNEL
 
 for CHANNEL between 1 and 16.
 
@@ -116,16 +124,13 @@ Configuring vibrato
 
 Vibrato is activated by shaking your hand left to right. The speed and
 intensity of the motion will be reflected in the frequency and depth of an
-output pitch bend oscillation. To configure this gesture, use
+output pitch bend oscillation. To configure this gesture in a slot, use
 
-  ringctl DEVICE [BANK] vibrato ENABLE
+  ringctl DEVICE BANK SLOT ENABLE vibrato GAIN THRESHOLD
 
-or
-
-  ringctl DEVICE [BANK] vibrato ENABLE GAIN THRESHOLD
-
-ENABLE is 0 to disable vibrato, or 1 to enable it. The pink LED on the hub
-shows this status and it can be toggled with the corresponding hub button.
+ENABLE sets the initial state of the gesture: 0 if disabled or 1 if enabled.
+It can later be toggled on and off with the corresponding hub button, and
+when enabled, the slot LED will glow pink to indicate vibrato is active.
 
 GAIN and THRESHOLD are percentages from 0.0 to 100.0. Higher GAIN deepens
 the pitch oscillation for a given finger motion, and higher THRESHOLD
@@ -140,16 +145,13 @@ Configuring pitch bend
 
 Pitch bend is activated by rolling your hand to the left to bend down or to
 the right to bend up. The pitch deflection increases with the angle of roll.
-To configure this gesture, use
+To configure this gesture in a slot, use
 
-  ringctl DEVICE [BANK] bend ENABLE
+  ringctl DEVICE BANK SLOT ENABLE bend LMIN LMAX RMIN RMAX
 
-or
-
-  ringctl DEVICE [BANK] bend ENABLE LMIN LMAX RMIN RMAX
-
-ENABLE is 0 to disable bend, or 1 to enable it. The purple LED on the hub
-shows this status and it can be toggled with the corresponding hub button.
+ENABLE sets the initial state of the gesture: 0 if disabled or 1 if enabled.
+It can later be toggled on and off with the corresponding hub button, and
+when enabled, the slot LED will glow purple to indicate bend is active.
 
 LMIN, LMAX, RMIN and RMAX are angles from -100.0 degrees to +100.0 degrees,
 such that LMIN < LMAX < RMIN < RMAX, where a level hand position corresponds
@@ -163,16 +165,13 @@ Configuring tilt
 
 Tilt is activated by tipping your hand to point upwards or downwards. The
 controller or pitch deflection varies with the angle of tilt. To configure
-the tilt gesture, use
+this gesture in a slot, use
 
-  ringctl DEVICE [BANK] tilt ENABLE
+  ringctl DEVICE BANK SLOT ENABLE tilt CONTROL LOW HIGH MIN MAX
 
-or
-
-  ringctl DEVICE [BANK] tilt ENABLE CONTROL LOW HIGH MIN MAX
-
-ENABLE is 0 to disable tilt, or 1 to enable it. The yellow LED on the hub
-shows this status and it can be toggled with the corresponding hub button.
+ENABLE sets the initial state of the gesture: 0 if disabled or 1 if enabled.
+It can later be toggled on and off with the corresponding hub button, and
+when enabled, the slot LED will glow yellow to indicate tilt is active.
 
 CONTROL is the MIDI controller number (0-127) to generate, or -1 for pitch
 bend. Controller output is constrained to lie between LOW and HIGH (0-127).
@@ -186,17 +185,14 @@ Configuring roll
 ----------------
 
 Roll is activated by rolling your hand to the left or right. The controller
-or pitch deflection varies with the angle of roll. To configure the roll
-gesture, use
+or pitch deflection varies with the angle of roll. To configure this gesture
+in a slot, use
 
-  ringctl DEVICE [BANK] roll ENABLE
+  ringctl DEVICE BANK SLOT ENABLE roll CONTROL LOW HIGH MIN MAX
 
-or
-
-  ringctl DEVICE [BANK] roll ENABLE CONTROL LOW HIGH MIN MAX
-
-ENABLE is 0 to disable roll, or 1 to enable it. The turquoise LED on the hub
-shows this status and it can be toggled with the corresponding hub button.
+ENABLE sets the initial state of the gesture: 0 if disabled or 1 if enabled.
+It can later be toggled on and off with the corresponding hub button, and
+when enabled, the slot LED will glow turquoise to indicate roll is active.
 
 CONTROL is the MIDI controller number (0-127) to generate, or -1 for pitch
 bend. Controller output is constrained to lie between LOW and HIGH (0-127).
@@ -206,11 +202,21 @@ hand position corresponds to 0.0 degrees. As your hand rolls between MIN and
 MAX, controller output varies continuously between LOW and HIGH.
 
 
+Removing a gesture
+------------------
+
+To remove the gesture from a slot, leaving it empty, use
+
+  ringctl DEVICE BANK SLOT remove
+
+It is not necessary to remove gestures to replace them: just overwrite them.
+
+
 Storing the configuration
 -------------------------
 
-Gesture configuration changes made using the above commands can be written
-to flash in the hub using
+Configuration changes made using the above commands can be written to flash
+in the hub using
 
   ringctl DEVICE store
 

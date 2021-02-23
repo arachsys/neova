@@ -12,13 +12,15 @@ def decode(value):
   half, full = 0x42480000, 0x42c80000
   exponent = math.log(2) / (math.log(full) - math.log(half))
   sign, value = 2 * (value < 1 << 31) - 1, float(value & (1 << 31) - 1)
-  return 100.0 * sign * (value / full) ** exponent
+  return f'{100.0 * sign * (value / full) ** exponent:0.1f}'
 
 def encode(value):
   half, full = 0x42480000, 0x42c80000
   exponent = (math.log(full) - math.log(half)) / math.log(2)
-  sign, value = (value < 0) << 31, min(abs(value) / 100.0, 1.0)
-  return sign + round(full * value ** exponent)
+  sign, value = (float(value) < 0) << 31, abs(float(value)) / 100.0
+  if value <= 100.0:
+    return sign + round(full * value ** exponent)
+  raise ValueError
 
 def get(device, header, size):
   data, length = bytearray(size), 0
@@ -49,29 +51,68 @@ def serial(path, rate = 9600):
     termios.tcsetattr(handle, termios.TCSAFLUSH, saved)
     os.close(handle)
 
-def update(config, offset, active, control = None, low = 0, high = 127,
-    *parameters):
-  config[offset] = bool(active)
-  if control is not None:
-    struct.pack_into('4B', config, offset + 2, low, high, max(0, control),
-      control >= 0)
-  length, parameters = len(parameters), map(encode, parameters)
-  struct.pack_into(f'<{length}I', config, offset + 6, *parameters)
+def remove(config, bank, slot):
+  bank, slot = map(int, (bank, slot))
+  if 1 <= bank <= 4 and 1 <= slot <= 4:
+    offset = 132 * bank + 32 * slot - 140
+    return struct.pack_into('2x6B24x', config, offset, 0, 6, 0, 127, 0, 1)
+  raise ValueError
+
+def replace(config, bank, slot, enable, kind, control, low, high, *values):
+  bank, slot, enable, kind = map(int, (bank, slot, enable, kind))
+  if 1 <= bank <= 4 and 1 <= slot <= 4 and enable in [0, 1]:
+    control, low, high = map(int, (control, low, high))
+    if -1 <= control <= 127 and 0 <= low <= high <= 127:
+      offset = 132 * bank + 32 * slot - 140
+      return struct.pack_into('<2x6B6I', config, offset, enable, kind,
+        low, high, max(0, control), control >= 0, *map(encode, values),
+        *[0x40000000] * (6 - len(values)))
+  raise ValueError
+
+def show(config):
+  print('hub', f'{config[14]}.{config[15]}')
+  if config[16] == config[17] == 0:
+    print('ring disconnected')
+  else:
+    print('ring', f'{config[16]}.{config[17]}')
+  print('bank', f'{config[18] + 1}')
+
+  for bank in [1, 2, 3, 4]:
+    sys.stdout.write('\n')
+    print(bank, 'channel', config[132 * bank - 110])
+    for slot in [1, 2, 3, 4]:
+      gesture = struct.unpack_from('<2x6B6I', config,
+        132 * bank + 32 * slot - 140)
+      if gesture[1] != 6:
+        print(bank, slot, gesture[0], end = ' ')
+        if gesture[1] == 0:
+          print('vibrato', *map(decode, gesture[6:8]))
+        elif gesture[1] == 1:
+          print('bend', *map(decode, gesture[6:10]))
+        elif gesture[1] == 2:
+          print('tilt', gesture[4] if gesture[5] else -1, *gesture[2:4],
+            *map(decode, gesture[6:8]))
+        elif gesture[1] == 3:
+          print('roll', gesture[4] if gesture[5] else -1, *gesture[2:4],
+            *map(decode, gesture[6:8]))
+        else:
+          print('unknown')
 
 def usage():
   sys.stderr.write(f'''\
 Usage:
   {sys.argv[0]} DEVICE [show]
-  {sys.argv[0]} DEVICE [BANK] channel CHANNEL
-  {sys.argv[0]} DEVICE [BANK] vibrato ENABLE [ GAIN THRESHOLD ]
-  {sys.argv[0]} DEVICE [BANK] bend ENABLE [ LMIN LMAX RMIN RMAX ]
-  {sys.argv[0]} DEVICE [BANK] tilt ENABLE [ CONTROL LOW HIGH MIN MAX ]
-  {sys.argv[0]} DEVICE [BANK] roll ENABLE [ CONTROL LOW HIGH MIN MAX ]
   {sys.argv[0]} DEVICE bank BANK
+  {sys.argv[0]} DEVICE BANK channel CHANNEL
+  {sys.argv[0]} DEVICE BANK SLOT ENABLE vibrato GAIN THRESHOLD
+  {sys.argv[0]} DEVICE BANK SLOT ENABLE bend LMIN LMAX RMIN RMAX
+  {sys.argv[0]} DEVICE BANK SLOT ENABLE tilt CONTROL LOW HIGH MIN MAX
+  {sys.argv[0]} DEVICE BANK SLOT ENABLE roll CONTROL LOW HIGH MIN MAX
+  {sys.argv[0]} DEVICE BANK SLOT remove
   {sys.argv[0]} DEVICE store
 
 Arguments:
-  BANK: gesture bank (1-4), defaults to selected bank
+  BANK: gesture bank (1-4)
   CHANNEL: output MIDI channel (1-16)
   CONTROL: controller number (0-127) or -1 for pitch bend
   DEVICE: serial device path, e.g. /dev/ttyACM0
@@ -100,81 +141,33 @@ with serial(sys.argv[1]) as device:
   config = get(device, b'jeannine\x03\x00\x00\x00', 548)
 
   if len(sys.argv) == 2 or sys.argv[2:] == ['show']:
-    print(f'Hub version: {config[14]}.{config[15]}')
-    if config[16] == config[17] == 0:
-      print('Ring version: not connected')
-    else:
-      print(f'Ring version: {config[16]}.{config[17]}')
-    print(f'Selected bank: {config[18] + 1}')
-
-    for bank in [1, 2, 3, 4]:
-      channel = config[132 * bank - 110]
-      vibrato = struct.unpack_from('<B5x2I', config, 132 * bank - 106)
-      bend = struct.unpack_from('<B5x4I', config, 132 * bank - 74)
-      tilt = struct.unpack_from('<Bx4B2I', config, 132 * bank - 42)
-      roll = struct.unpack_from('<Bx4B2I', config, 132 * bank - 10)
-      print(f'\nBank {bank}:')
-      print('  channel', channel)
-      print('  vibrato', vibrato[0],
-        *(f'{decode(value):0.1f}' for value in vibrato[1:]))
-      print('  bend', bend[0],
-        *(f'{decode(value):0.1f}' for value in bend[1:]))
-      print('  tilt', tilt[0], tilt[3] if tilt[4] else -1, *tilt[1:3],
-        *(f'{decode(value):0.1f}' for value in tilt[5:]))
-      print('  roll', roll[0], roll[3] if roll[4] else -1, *roll[1:3],
-        *(f'{decode(value):0.1f}' for value in roll[5:]))
-    sys.exit(0)
-
-  if len(sys.argv) == 3 and sys.argv[2] == 'store':
+    show(config)
+  elif len(sys.argv) == 3 and sys.argv[2] == 'store':
     device.write(b'jeannine\x04\x00\x00\x00')
-    sys.exit(0)
-
-  if len(sys.argv) == 4 and sys.argv[2] == 'bank':
-    try:
-      bank = int(sys.argv[3])
-      assert 1 <= bank <= 4
-    except:
-      usage()
-    config[18] = bank - 1
-    device.write(config)
-    sys.exit(0)
-
-  try:
-    bank, gesture = int(sys.argv[2]), sys.argv[3:]
-    assert len(gesture) > 0 and 1 <= bank <= 4
-  except:
-    bank, gesture = config[18] + 1, sys.argv[2:]
-
-  if len(gesture) == 2 and gesture[0] == 'channel':
-    try:
-      channel = int(gesture[1])
-      assert 1 <= channel <= 16
-    except:
-      usage()
-    config[132 * bank - 110] = channel
   else:
-    if len(gesture) in [2, 4] and gesture[0] == 'vibrato':
-      offset = 132 * bank - 106
-      gesture[2:2] = [-1, 0, 127]
-    elif len(gesture) in [2, 6] and gesture[0] == 'bend':
-      offset = 132 * bank - 74
-      gesture[2:2] = [-1, 0, 127]
-    elif len(gesture) in [2, 7] and gesture[0] == 'tilt':
-      offset = 132 * bank - 42
-    elif len(gesture) in [2, 7] and gesture[0] == 'roll':
-      offset = 132 * bank - 10
-    else:
-      usage()
-
     try:
-      gesture[1:5] = map(int, gesture[1:5])
-      gesture[5:] = map(float, gesture[5:])
-      for index, value in enumerate(gesture[1:]):
-        assert value >= [0, -1, 0, 0, -100.0][min(index, 4)]
-        assert value <= [1, 127, 127, 127, 100.0][min(index, 4)]
-    except:
+      if len(sys.argv) == 4 and sys.argv[2] == 'bank':
+        if not 1 <= int(sys.argv[3]) <= 4:
+          raise ValueError
+        config[18] = int(sys.argv[3]) - 1
+      elif not 1 <= int(sys.argv[2]) <= 4:
+        raise ValueError
+      elif len(sys.argv) == 5 and sys.argv[3] == 'channel':
+        if not 1 <= int(sys.argv[4]) <= 16:
+          raise ValueError
+        config[132 * int(sys.argv[2]) - 110] = int(sys.argv[4])
+      elif len(sys.argv) == 5 and sys.argv[4] == 'remove':
+        remove(config, sys.argv[2], sys.argv[3])
+      elif len(sys.argv) == 8 and sys.argv[5] == 'vibrato':
+        replace(config, *sys.argv[2:5], 0, -1, 0, 127, *sys.argv[6:8])
+      elif len(sys.argv) == 10 and sys.argv[5] == 'bend':
+        replace(config, *sys.argv[2:5], 1, -1, 0, 127, *sys.argv[6:10])
+      elif len(sys.argv) == 11 and sys.argv[5] == 'tilt':
+        replace(config, *sys.argv[2:5], 2, *sys.argv[6:11])
+      elif len(sys.argv) == 11 and sys.argv[5] == 'roll':
+        replace(config, *sys.argv[2:5], 3, *sys.argv[6:11])
+      else:
+        usage()
+    except ValueError:
       usage()
-    update(config, offset, *gesture[1:])
-
-  device.write(config)
-  sys.exit(0)
+    device.write(config)

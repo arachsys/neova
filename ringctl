@@ -70,11 +70,11 @@ def replace(config, bank, slot, enable, kind, control, low, high, *values):
   raise ValueError
 
 def show(config):
-  print('hub', f'{config[14]}.{config[15]}')
+  print('hub', f'{config[15]}.{config[14]}')
   if config[16] == config[17] == 0:
     print('ring disconnected')
   else:
-    print('ring', f'{config[16]}.{config[17]}')
+    print('ring', f'{config[17]}.{config[16]}')
   print('bank', f'{config[18] + 1}')
 
   for bank in [1, 2, 3, 4]:

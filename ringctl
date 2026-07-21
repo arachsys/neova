@@ -29,7 +29,7 @@ def get(device, header, size):
       length = length + device.readinto(view[length:])
       try:
         index = data.index(header, 0, length)
-      except:
+      except Exception:
         index = length + 1 - len(header)
       if index > 0:
         view[0 : length - index] = view[index : length]
